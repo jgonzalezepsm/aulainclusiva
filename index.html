@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traductor Simultáneo para el Aula</title>
+    <!-- Tailwind CSS para el diseño rápido y adaptativo -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Fondo oscuro para mejor contraste en proyección */
+            color: #f8fafc;
+        }
+        /* Animación para el indicador del micrófono */
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .mic-active {
+            animation: pulse 2s infinite;
+            background-color: #ef4444;
+        }
+        .mic-inactive {
+            background-color: #64748b;
+        }
+        /* Estilos para el texto proyectado - MEJORADO PARA ALTO CONTRASTE */
+        .translated-text {
+            font-size: 1.75rem; /* Tamaño ajustado para el panel lateral */
+            line-height: 1.3;
+            font-weight: 800;
+            color: #facc15; /* Tailwind text-yellow-400 para máximo contraste en fondo oscuro */
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        /* Transición suave para nuevos textos */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+    <!-- Script necesario para el selector de Google Drive -->
+    <script src="https://apis.google.com/js/api.js"></script>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- BARRA DE CONTROL SUPERIOR -->
+    <header class="bg-slate-900 border-b border-slate-700 p-4 flex flex-col lg:flex-row justify-between items-center gap-4 shrink-0 flex-wrap">
+        <div class="flex flex-wrap items-center gap-4 w-full lg:w-auto justify-center lg:justify-start">
+            <button id="micBtn" class="mic-inactive text-white font-bold py-3 px-6 rounded-full shadow-lg transition-colors flex items-center gap-2">
+                <svg id="micIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <!-- Icono de Play por defecto -->
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span id="micText">Iniciar Micrófono</span>
+            </button>
+            
+            <div class="flex flex-col">
+                <label for="sourceLang" class="text-xs text-slate-400 uppercase tracking-wider">Idioma del Profesor</label>
+                <select id="sourceLang" class="bg-slate-800 text-white border border-slate-600 rounded p-1 outline-none text-sm">
+                    <option value="es-ES">Castellano</option>
+                    <option value="ca-ES">Català</option>
+                    <option value="ca-VA">Valencià</option>
+                    <option value="gl-ES">Galego (Gallego)</option>
+                    <option value="eu-ES">Euskera</option>
+                    <option value="en-US">English</option>
+                    <!-- Portugués eliminado a petición -->
+                </select>
+            </div>
+            
+            <div class="flex flex-col">
+                <label for="gridSize" class="text-xs text-slate-400 uppercase tracking-wider">Diseño</label>
+                <select id="gridSize" class="bg-slate-800 text-white border border-slate-600 rounded p-1 outline-none text-sm">
+                    <option value="4">4 Pantallas (2x2)</option>
+                    <option value="3">3 Pantallas (1x3)</option>
+                </select>
+            </div>
+            
+            <div class="flex flex-col">
+                <label for="voicePreference" class="text-xs text-slate-400 uppercase tracking-wider">Tipo de Voz</label>
+                <select id="voicePreference" class="bg-slate-800 text-white border border-slate-600 rounded p-1 outline-none text-sm">
+                    <option value="0">Voz 1 (Principal)</option>
+                    <option value="1">Voz 2 (Alternativa)</option>
+                    <option value="2">Voz 3</option>
+                </select>
+            </div>
+
+            <!-- BOTÓN DESCARGAR TRANSCRIPCIÓN -->
+            <button id="downloadTranscriptBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors shadow flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                Descargar Sesión
+            </button>
+        </div>
+
+        <!-- Visualizador de lo que el profesor está diciendo en tiempo real (Interim results) -->
+        <div class="flex-1 bg-slate-800 rounded-lg p-3 w-full lg:w-auto overflow-hidden min-w-[250px]">
+            <span class="text-xs text-slate-400 block mb-1">Reconocimiento en vivo:</span>
+            <p id="interimText" class="text-slate-300 italic truncate h-6">Esperando a que hables...</p>
+        </div>
+    </header>
+
+    <!-- ÁREA PRINCIPAL DIVIDIDA (Presentación + Traducciones) -->
+    <div class="flex-1 flex flex-col lg:flex-row overflow-hidden bg-slate-950">
+        
+        <!-- ÁREA DE PROYECCIÓN DE TRADUCCIONES (Izquierda) -->
+        <aside id="gridContainer" class="w-full shrink-0 grid gap-4 p-4 overflow-y-auto bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-700">
+            <!-- Los paneles se generarán dinámicamente con JavaScript -->
+        </aside>
+
+        <!-- PANTALLA PRINCIPAL DE PRESENTACIÓN (Derecha) -->
+        <section class="flex-1 flex flex-col p-4 relative">
+            <div class="mb-4 flex flex-col gap-3 shrink-0 bg-slate-900 p-3 rounded-xl border border-slate-700 shadow-sm">
+                <!-- Fila 1: Cargar presentación -->
+                <div class="flex flex-col sm:flex-row gap-3 items-center w-full">
+                    <button id="btnDrivePicker" class="bg-white hover:bg-slate-100 text-slate-800 font-semibold py-2 px-5 rounded-lg text-sm transition-all shadow flex items-center justify-center gap-3 border border-slate-200 w-full sm:w-auto">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-5 h-5">
+                            <path fill="#FFC107" d="M17 5.8L5 26.6h16l12-20.8z"/>
+                            <path fill="#1976D2" d="M33 5.8H17l-12 20.8h16z"/>
+                            <path fill="#4CAF50" d="M43 26.6H27L15 47.4h16z"/>
+                        </svg>
+                        Abrir desde Drive
+                    </button>
+                    <div class="hidden sm:block w-px h-8 bg-slate-700"></div>
+                    <div class="flex-1 flex gap-2 w-full">
+                        <input type="text" id="presentationUrl" placeholder="O pega un enlace aquí (Slides, Docs...)" class="flex-1 bg-slate-800 text-white border border-slate-600 rounded-lg p-2 outline-none focus:border-blue-500 transition-colors text-sm">
+                        <button id="loadPresentationBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors shadow-lg">Mostrar</button>
+                    </div>
+                </div>
+                <!-- Fila 2: Traducción manual de texto -->
+                <div class="flex flex-col sm:flex-row gap-2 w-full border-t border-slate-700 pt-3">
+                    <button id="openReadModalBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors shadow-lg flex items-center justify-center gap-2 w-full sm:w-auto">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                        Leer Pantalla Principal
+                    </button>
+                    <input type="text" id="manualTextInput" placeholder="Pega texto aquí para enviarlo a los paneles..." class="flex-1 bg-slate-800 text-white border border-slate-600 rounded-lg p-2 outline-none focus:border-purple-500 transition-colors text-sm">
+                    <button id="translateTextBtn" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition-colors shadow-lg flex items-center justify-center gap-2 whitespace-nowrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden sm:block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                        Traducir
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex-1 bg-black rounded-xl overflow-hidden border border-slate-700 shadow-inner flex items-center justify-center relative">
+                <span id="iframePlaceholder" class="text-slate-500 text-center p-4 absolute z-0">La presentación aparecerá aquí.</span>
+                <iframe id="presentationIframe" class="w-full h-full relative z-10" src="about:blank" frameborder="0" allowfullscreen></iframe>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Template para cada panel de idioma -->
+    <template id="panelTemplate">
+        <div class="panel bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl flex flex-col overflow-hidden relative">
+            <div class="bg-slate-900 p-2 sm:p-3 border-b border-slate-700 flex flex-wrap justify-between items-center gap-2">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <span class="flagIcon text-xl sm:text-2xl shrink-0" title="Bandera del idioma"></span>
+                    <select class="targetLang text-sm sm:text-base font-bold bg-transparent text-white outline-none cursor-pointer hover:text-blue-300 transition-colors flex-1 min-w-0 text-ellipsis overflow-hidden">
+                        <!-- Opciones de idioma ampliadas -->
+                        <option value="ca">Català</option>
+                        <option value="ca-VA">Valencià</option>
+                        <option value="gl">Galego (Gallego)</option>
+                        <option value="eu">Euskera</option>
+                        <option value="es">Castellano</option>
+                        <option value="pt-BR">Português (Brasil)</option>
+                        <option value="pt-PT">Português (Portugal)</option>
+                        <option value="en">English</option>
+                        <option value="fr">Français</option>
+                        <option value="de">Deutsch (Alemán)</option>
+                        <option value="it">Italiano</option>
+                        <option value="ro">Română (Rumano)</option>
+                        <option value="uk">Українська (Ucraniano)</option>
+                        <option value="ru">Русский (Ruso)</option>
+                        <option value="zh-CN">中文 (Chino)</option>
+                        <option value="ar">العربية (Árabe)</option>
+                        <option value="ur">اردو (Urdú)</option>
+                        <option value="hi">हिन्दी (Hindi)</option>
+                    </select>
+                </div>
+                <div class="flex gap-0.5 sm:gap-1 shrink-0">
+                    <button class="reloadBtn text-slate-400 hover:text-blue-400 transition-colors p-1.5 sm:p-2 rounded-full hover:bg-slate-700" title="Traducir última frase a este idioma">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+                    <button class="playAudioBtn text-slate-400 hover:text-white transition-colors p-1.5 sm:p-2 rounded-full hover:bg-slate-700" title="Reproducir audio">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="p-4 sm:p-6 flex-1 flex items-center justify-center overflow-hidden">
+                <p class="translatedText translated-text text-center fade-in"></p>
+            </div>
+        </div>
+    </template>
+
+    <!-- MODAL AVISO GOOGLE DRIVE -->
+    <div id="driveModal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-md w-full shadow-2xl">
+            <h3 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" class="w-6 h-6"><path fill="#FFC107" d="M17 5.8L5 26.6h16l12-20.8z"/><path fill="#1976D2" d="M33 5.8H17l-12 20.8h16z"/><path fill="#4CAF50" d="M43 26.6H27L15 47.4h16z"/></svg>
+                Conexión con Google Drive
+            </h3>
+            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                Para explorar tus archivos directamente desde aquí, el centro escolar necesita configurar las credenciales de la API de Google (<span class="text-blue-300 font-semibold">Client ID</span> y <span class="text-blue-300 font-semibold">API Key</span>) en el código fuente de esta herramienta.
+            </p>
+            <p class="text-slate-300 mb-6 text-sm leading-relaxed">
+                <strong>Solución rápida:</strong> Abre tu Google Drive en otra pestaña, copia el enlace de tu presentación y pégalo en la barra superior.
+            </p>
+            <div class="flex justify-end gap-3 mt-2">
+                <a href="https://drive.google.com" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow">Abrir mi Drive</a>
+                <button id="closeDriveModalBtn" class="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL LECTURA / TRADUCCIÓN DE PRESENTACIÓN -->
+    <div id="readModal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-800 rounded-xl border border-slate-600 p-6 max-w-2xl w-full shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                    Asistente de Lectura de Contenido
+                </h3>
+                <button id="closeReadModalBtn" class="text-slate-400 hover:text-white transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+            <p class="text-slate-300 mb-3 text-sm leading-relaxed">
+                Por privacidad, el navegador no puede extraer el texto automáticamente. <strong>Copia el contenido de tu presentación y pégalo aquí</strong> para leerlo en voz alta o traducirlo a los paneles.
+            </p>
+            <textarea id="modalTextarea" class="w-full flex-1 bg-slate-900 text-white border border-slate-600 rounded-lg p-3 outline-none focus:border-indigo-500 transition-colors text-base min-h-[150px] resize-none mb-4" placeholder="Pega aquí el texto de tu presentación..."></textarea>
+            
+            <div class="flex flex-col sm:flex-row justify-end gap-3">
+                <button id="modalReadBtn" class="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors shadow flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M11 5L6 9H2v6h4l5 4V5z" /></svg>
+                    Leer en Voz Alta
+                </button>
+                <button id="modalTranslateBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors shadow flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                    Traducir a Paneles
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL ERROR MICRÓFONO -->
+    <div id="micErrorModal" class="fixed inset-0 bg-black/80 z-[100] hidden flex items-center justify-center p-4">
+        <div class="bg-slate-800 rounded-xl border border-red-500 p-6 max-w-md w-full shadow-2xl">
+            <h3 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                Micrófono Bloqueado
+            </h3>
+            <p class="text-slate-300 mb-4 text-sm leading-relaxed">
+                El navegador o la plataforma ha denegado el acceso al micrófono por seguridad.
+            </p>
+            <div class="bg-slate-900 p-3 rounded-lg border border-slate-700 mb-4">
+                <strong class="text-white text-sm block mb-1">¿Estás en Google Sites?</strong>
+                <p class="text-xs text-slate-400">Google Sites bloquea el micrófono si incrustas la web como una página. La solución correcta es ir a tu Site, usar la opción <strong>"Insertar Botón"</strong> y pegar el enlace de esta aplicación para que se abra a pantalla completa.</p>
+            </div>
+            <div class="flex justify-end gap-3 mt-2">
+                <button id="closeMicErrorBtn" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow">Entendido</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN E INICIALIZACIÓN ---
+        const micBtn = document.getElementById('micBtn');
+        const micText = document.getElementById('micText');
+        const interimTextDisplay = document.getElementById('interimText');
+        const gridContainer = document.getElementById('gridContainer');
+        const gridSizeSelect = document.getElementById('gridSize');
+        const sourceLangSelect = document.getElementById('sourceLang');
+        const panelTemplate = document.getElementById('panelTemplate');
+
+        let isListening = false;
+        let recognition = null;
+        let panels = [];
+        let lastSpokenText = ""; // Guardará la última frase que dijiste
+        let sessionTranscript = []; // Guardará todo el historial para descargar
+
+        // Idiomas predeterminados para las 4 pantallas para abarcar la diversidad del aula
+        const defaultLangs = ['ca', 'es', 'zh-CN', 'ar'];
+
+        // Almacenar las voces de síntesis disponibles en el sistema
+        let synthVoices = [];
+        window.speechSynthesis.onvoiceschanged = () => {
+            synthVoices = window.speechSynthesis.getVoices();
+        };
+        // Intentar cargar inmediatamente por si ya están disponibles
+        synthVoices = window.speechSynthesis.getVoices();
+
+        // SVG de la Senyera para el Catalán (ya que no hay emoji oficial)
+        const senyeraSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" class="w-8 h-6 rounded-sm inline-block shadow-sm"><rect width="9" height="6" fill="#FCE100"/><rect width="9" height="0.75" y="0.75" fill="#CE1126"/><rect width="9" height="0.75" y="2.25" fill="#CE1126"/><rect width="9" height="0.75" y="3.75" fill="#CE1126"/><rect width="9" height="0.75" y="5.25" fill="#CE1126"/></svg>`;
+        
+        const valenciaSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" class="w-8 h-6 rounded-sm inline-block shadow-sm"><rect width="9" height="6" fill="#FCE100"/><rect width="9" height="0.75" y="0.75" fill="#CE1126"/><rect width="9" height="0.75" y="2.25" fill="#CE1126"/><rect width="9" height="0.75" y="3.75" fill="#CE1126"/><rect width="9" height="0.75" y="5.25" fill="#CE1126"/><rect width="2.5" height="6" fill="#0038A8"/><rect width="0.2" height="6" x="2.1" fill="#CFB53B"/></svg>`;
+        
+        const galiciaSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 6" class="w-8 h-6 rounded-sm inline-block shadow-sm"><rect width="9" height="6" fill="#fff"/><polygon points="0,0 2,0 9,5.5 9,6 7,6 0,0.5" fill="#00bfff"/></svg>`;
+        
+        const euskeraSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 10" class="w-8 h-6 rounded-sm inline-block shadow-sm"><rect width="14" height="10" fill="#ce1126"/><line x1="0" y1="0" x2="14" y2="10" stroke="#009b48" stroke-width="1.5"/><line x1="14" y1="0" x2="0" y2="10" stroke="#009b48" stroke-width="1.5"/><line x1="7" y1="0" x2="7" y2="10" stroke="#fff" stroke-width="1.5"/><line x1="0" y1="5" x2="14" y2="5" stroke="#fff" stroke-width="1.5"/></svg>`;
+
+        // Mapa de banderas ampliado
+        const flagMap = {
+            'ca': senyeraSVG,
+            'ca-VA': valenciaSVG,
+            'gl': galiciaSVG,
+            'eu': euskeraSVG,
+            'es': '🇪🇸',
+            'pt-BR': '🇧🇷',
+            'pt-PT': '🇵🇹',
+            'en': '🇬🇧',
+            'fr': '🇫🇷',
+            'de': '🇩🇪',
+            'it': '🇮🇹',
+            'ro': '🇷🇴',
+            'uk': '🇺🇦',
+            'ru': '🇷🇺',
+            'zh-CN': '🇨🇳',
+            'ar': '🇸🇦',
+            'ur': '🇵🇰',
+            'hi': '🇮🇳'
+        };
+
+        // --- SISTEMA DE RECONOCIMIENTO DE VOZ (Web Speech API) ---
+        function setupSpeechRecognition() {
+            window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!window.SpeechRecognition) {
+                // Actualizar interfaz si el navegador no es compatible
+                micBtn.classList.remove('mic-inactive', 'hover:bg-slate-700');
+                micBtn.classList.add('bg-slate-700', 'opacity-50', 'cursor-not-allowed');
+                micText.innerText = "Micrófono no soportado";
+                micBtn.onclick = () => alert("Tu navegador o dispositivo no soporta el reconocimiento de voz nativo (Web Speech API).\n\nSOPORTE GARANTIZADO EN:\n- Google Chrome (Windows, Mac, Android, Chromebooks)\n- Microsoft Edge\n- Safari (versiones modernas, IOS requiere permisos explícitos)\n\nNavegadores como Firefox aún no tienen soporte completo para esta función.");
+                return;
+            }
+
+            // Comprobación de seguridad (HTTPS)
+            if (window.location.protocol === 'http:' && window.location.hostname !== 'localhost') {
+                console.warn("El micrófono requiere una conexión segura (HTTPS).");
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;      // Sigue escuchando aunque hagas pausas
+            recognition.interimResults = true;  // Muestra resultados parciales antes de terminar la frase
+
+            // Actualizar el idioma de escucha cuando cambie el selector
+            recognition.lang = sourceLangSelect.value;
+            sourceLangSelect.addEventListener('change', () => {
+                recognition.lang = sourceLangSelect.value;
+                if(isListening) {
+                    isListening = false;
+                    recognition.stop();
+                    setTimeout(() => toggleMic(), 300);
+                }
+            });
+
+            recognition.onstart = () => {
+                isListening = true;
+                micBtn.classList.remove('mic-inactive');
+                micBtn.classList.add('mic-active');
+                micText.innerText = "Pausar Micrófono";
+                // Icono de Pausa
+                document.getElementById('micIcon').innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />`;
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                interimTextDisplay.innerText = interimTranscript || finalTranscript;
+
+                if (finalTranscript.trim().length > 0) {
+                    lastSpokenText = finalTranscript.trim();
+                    // Guardar en el historial
+                    const timestamp = new Date().toLocaleTimeString();
+                    sessionTranscript.push(`[${timestamp}] ORIGINAL (${sourceLangSelect.value}): ${lastSpokenText}`);
+                    
+                    processTranslation(lastSpokenText);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Error en reconocimiento de voz:", event.error);
+                if (event.error === 'not-allowed' || event.error === 'security') {
+                    // Mostrar modal amigable en lugar de alertas bloqueantes
+                    document.getElementById('micErrorModal').classList.remove('hidden');
+                } else if (event.error === 'network') {
+                    interimTextDisplay.innerText = "❌ Error de red: No se puede contactar con el servidor de voz.";
+                } else if (event.error === 'no-speech') {
+                    // Simplemente no se detectó voz, no es un error crítico
+                } else {
+                    interimTextDisplay.innerText = "⚠️ Error del micrófono: " + event.error;
+                }
+                
+                isListening = false;
+                updateMicUIStopped();
+            };
+
+            recognition.onend = () => {
+                // Auto-reinicio robusto para navegadores móviles y tablets (especialmente iOS)
+                if (isListening) {
+                    setTimeout(() => {
+                        if(isListening) {
+                            try { recognition.start(); } 
+                            catch(e) { console.error("Fallo auto-reinicio", e); updateMicUIStopped(); }
+                        }
+                    }, 300);
+                } else {
+                    updateMicUIStopped();
+                }
+            };
+        }
+
+        function updateMicUIStopped() {
+            micBtn.classList.add('mic-inactive');
+            micBtn.classList.remove('mic-active');
+            micText.innerText = "Iniciar Micrófono";
+            // Icono de Play
+            document.getElementById('micIcon').innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664zM21 12a9 9 0 11-18 0 9 9 0 0118 0z" />`;
+            if(!isListening) interimTextDisplay.innerText = "Micrófono en pausa.";
+        }
+
+        async function toggleMic() {
+            window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!window.SpeechRecognition) {
+                alert("Tu navegador no soporta el reconocimiento de voz nativo. Te recomendamos usar Google Chrome o Microsoft Edge.");
+                return;
+            }
+
+            if (!recognition) setupSpeechRecognition();
+            
+            if (isListening) {
+                isListening = false; // Intencionalmente parado
+                try { recognition.stop(); } catch(e) {}
+                updateMicUIStopped();
+            } else {
+                isListening = true; 
+                interimTextDisplay.innerText = "Iniciando micrófono...";
+                try {
+                    // Inicia el reconocimiento, el navegador pedirá permiso automáticamente si es necesario
+                    recognition.start();
+                } catch (e) {
+                    console.error("Error al iniciar el micro:", e);
+                }
+            }
+        }
+
+        // --- MOTOR DE TRADUCCIÓN (Vía Google Translate API Pública) ---
+        async function translateText(text, targetLang, sourceLang) {
+            // Mapeos especiales de idioma para la API de Google si es necesario
+            let apiSource = sourceLang.split('-')[0];
+            let apiTarget = targetLang.split('-')[0];
+            
+            // Excepciones de códigos
+            if (targetLang === 'zh-CN') apiTarget = 'zh-CN';
+            if (targetLang === 'pt-BR' || targetLang === 'pt-PT') apiTarget = 'pt';
+            
+            const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${apiSource}&tl=${apiTarget}&dt=t&q=${encodeURIComponent(text)}`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                let translatedStr = "";
+                // Concatenar todas las frases devueltas
+                data[0].forEach(part => { translatedStr += part[0]; });
+                
+                // Guardar en el historial de sesión
+                const timestamp = new Date().toLocaleTimeString();
+                sessionTranscript.push(`[${timestamp}] TRADUCCIÓN (${targetLang}): ${translatedStr}`);
+
+                return translatedStr;
+            } catch (error) {
+                console.error("Error en la traducción:", error);
+                return "Error de conexión ❌";
+            }
+        }
+
+        // Procesa la traducción para todos los paneles a la vez
+        function processTranslation(text) {
+            panels.forEach(async (panel) => {
+                const targetLang = panel.select.value;
+                const sourceLang = sourceLangSelect.value;
+                
+                panel.textDisplay.classList.remove('fade-in');
+                panel.textDisplay.innerText = "...";
+                
+                const translated = await translateText(text, targetLang, sourceLang);
+                
+                void panel.textDisplay.offsetWidth; // Forzar reinicio animación
+                panel.textDisplay.innerText = translated;
+                panel.textDisplay.classList.add('fade-in');
+            });
+        }
+
+        // --- DESCARGAR TRANSCRIPCIÓN ---
+        document.getElementById('downloadTranscriptBtn').addEventListener('click', () => {
+            if (sessionTranscript.length === 0) {
+                alert("Aún no hay textos grabados en esta sesión.");
+                return;
+            }
+            
+            const textContent = "--- TRANSCRIPCIÓN DE LA CLASE ---\n\n" + sessionTranscript.join("\n");
+            const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            const dateStr = new Date().toISOString().slice(0,10);
+            a.download = `Transcripcion_Aula_${dateStr}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+        // --- GESTIÓN DE LA INTERFAZ DE USUARIO ---
+        function createGrid(numPanels) {
+            gridContainer.innerHTML = '';
+            panels = [];
+
+            // Ajustar diseño en función del número de pantallas para aprovechar el formato panorámico
+            if (numPanels === 4) {
+                gridContainer.className = "w-full lg:w-[500px] xl:w-[650px] shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 overflow-y-auto bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-700";
+            } else {
+                gridContainer.className = "w-full lg:w-[250px] xl:w-[350px] shrink-0 grid grid-cols-1 gap-4 p-4 overflow-y-auto bg-slate-900 border-b lg:border-b-0 lg:border-r border-slate-700";
+            }
+
+            for (let i = 0; i < numPanels; i++) {
+                const clone = panelTemplate.content.cloneNode(true);
+                const panelDiv = clone.querySelector('.panel');
+                const select = clone.querySelector('.targetLang');
+                const textDisplay = clone.querySelector('.translatedText');
+                const playBtn = clone.querySelector('.playAudioBtn');
+                const reloadBtn = clone.querySelector('.reloadBtn');
+                const flagIcon = clone.querySelector('.flagIcon');
+
+                // Asignar idiomas por defecto
+                if(defaultLangs[i]) {
+                    select.value = defaultLangs[i];
+                }
+                
+                // Mostrar bandera inicial
+                flagIcon.innerHTML = flagMap[select.value] || '🌐';
+
+                // Ajustar dirección del texto inicial
+                if (select.value === 'ar' || select.value === 'ur') {
+                    textDisplay.dir = 'rtl';
+                }
+
+                select.addEventListener('change', (e) => {
+                    const newLang = e.target.value;
+                    flagIcon.innerHTML = flagMap[newLang] || '🌐';
+
+                    if (newLang === 'ar' || newLang === 'ur') {
+                        textDisplay.dir = 'rtl';
+                    } else {
+                        textDisplay.dir = 'ltr';
+                    }
+                    // Limpiar el texto al cambiar de idioma para evitar confusión visual
+                    textDisplay.innerText = '...';
+                });
+
+                // Botón para recargar y traducir la última frase en este panel
+                reloadBtn.addEventListener('click', async () => {
+                    if (!lastSpokenText) return; // Si no hay nada hablado, no hacer nada
+                    
+                    const targetLang = select.value;
+                    const currentSourceLang = sourceLangSelect.value;
+                    
+                    // Indicador visual de carga
+                    textDisplay.innerText = "...";
+                    
+                    const translated = await translateText(lastSpokenText, targetLang, currentSourceLang);
+                    
+                    textDisplay.classList.remove('fade-in');
+                    void textDisplay.offsetWidth; // Forzar reinicio de animación
+                    textDisplay.innerText = translated;
+                    textDisplay.classList.add('fade-in');
+                });
+
+                // Reproductor de Audio (Síntesis de voz)
+                playBtn.addEventListener('click', () => {
+                    const textToSpeak = textDisplay.innerText;
+                    if (!textToSpeak) return;
+                    
+                    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+                    let langCode = select.value;
+                    
+                    // Buscar si hay voces específicas para este idioma (filtrando por el prefijo, ej: 'es', 'ca')
+                    let availableForLang = synthVoices.filter(v => v.lang.startsWith(langCode) || v.lang.startsWith(langCode.split('-')[0]));
+                    
+                    if (availableForLang.length > 0) {
+                        const prefIndex = parseInt(document.getElementById('voicePreference').value);
+                        // Usar el módulo por si pedimos la voz 3 pero solo hay 2 instaladas
+                        utterance.voice = availableForLang[prefIndex % availableForLang.length];
+                    } else {
+                        // Fallback si no está el array cargado correctamente
+                        utterance.lang = langCode.split('-')[0];
+                    }
+                    
+                    window.speechSynthesis.speak(utterance);
+                });
+
+                gridContainer.appendChild(clone);
+                
+                panels.push({
+                    panelElement: gridContainer.lastElementChild,
+                    select: select,
+                    textDisplay: textDisplay
+                });
+            }
+        }
+
+        // --- GESTIÓN DE LA PRESENTACIÓN ---
+        document.getElementById('loadPresentationBtn').addEventListener('click', () => {
+            let url = document.getElementById('presentationUrl').value.trim();
+            if (!url) return;
+            
+            // Si es un enlace de Google Slides en modo edición, intentar convertirlo a modo presentación/preview
+            if (url.includes('docs.google.com/presentation') && url.includes('/edit')) {
+                url = url.replace(/\/edit.*$/, '/preview');
+            }
+            
+            // Ocultar el texto del placeholder
+            document.getElementById('iframePlaceholder').style.display = 'none';
+            document.getElementById('presentationIframe').src = url;
+        });
+
+        // --- GESTIÓN DE TRADUCCIÓN DE TEXTO MANUAL ---
+        document.getElementById('translateTextBtn').addEventListener('click', () => {
+            const text = document.getElementById('manualTextInput').value.trim();
+            if (text) {
+                lastSpokenText = text; // Permite que el botón recargar funcione con este texto
+                processTranslation(text);
+                
+                // Efecto visual de que se ha enviado
+                const btn = document.getElementById('translateTextBtn');
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = '¡Enviado!';
+                setTimeout(() => { btn.innerHTML = originalHTML; }, 1500);
+            }
+        });
+
+        // Permitir usar "Enter" para traducir rápidamente
+        document.getElementById('manualTextInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('translateTextBtn').click();
+            }
+        });
+
+        // --- GESTIÓN DE LECTURA Y MODAL DE PRESENTACIÓN ---
+        const readModal = document.getElementById('readModal');
+        const modalTextarea = document.getElementById('modalTextarea');
+
+        document.getElementById('openReadModalBtn').addEventListener('click', () => {
+            readModal.classList.remove('hidden');
+            modalTextarea.focus();
+        });
+
+        document.getElementById('closeReadModalBtn').addEventListener('click', () => {
+            readModal.classList.add('hidden');
+        });
+        
+        document.getElementById('closeMicErrorBtn').addEventListener('click', () => {
+            document.getElementById('micErrorModal').classList.add('hidden');
+        });
+
+        // Función reutilizable para leer texto en voz alta
+        function speakText(text) {
+            if (!text) return;
+            const utterance = new SpeechSynthesisUtterance(text);
+            let langCode = sourceLangSelect.value;
+            
+            let availableForLang = synthVoices.filter(v => v.lang.startsWith(langCode) || v.lang.startsWith(langCode.split('-')[0]));
+            
+            if (availableForLang.length > 0) {
+                const prefIndex = parseInt(document.getElementById('voicePreference').value);
+                utterance.voice = availableForLang[prefIndex % availableForLang.length];
+            } else {
+                utterance.lang = langCode.split('-')[0];
+            }
+            
+            window.speechSynthesis.speak(utterance);
+        }
+
+        document.getElementById('modalReadBtn').addEventListener('click', () => {
+            const text = modalTextarea.value.trim();
+            speakText(text);
+        });
+
+        document.getElementById('modalTranslateBtn').addEventListener('click', () => {
+            const text = modalTextarea.value.trim();
+            if (text) {
+                lastSpokenText = text;
+                processTranslation(text);
+                readModal.classList.add('hidden'); // Cerrar modal al enviar
+                modalTextarea.value = ''; // Limpiar
+            }
+        });
+
+        // --- INTEGRACIÓN GOOGLE DRIVE PICKER ---
+        // ATENCIÓN COORDINADOR: Para que el botón de Drive abra el selector interno de archivos,
+        // necesitas habilitar la "Google Picker API" en Google Cloud Console y rellenar estos datos:
+        const DRIVE_DEVELOPER_KEY = ''; // <-- Pon tu API Key aquí
+        const DRIVE_CLIENT_ID = '';     // <-- Pon tu Client ID aquí
+
+        document.getElementById('btnDrivePicker').addEventListener('click', () => {
+            if (!DRIVE_DEVELOPER_KEY || !DRIVE_CLIENT_ID) {
+                // Mostrar aviso amigable si no están configuradas las claves
+                document.getElementById('driveModal').classList.remove('hidden');
+            } else {
+                // Iniciar la carga del Picker de Google
+                gapi.load('auth', { 'callback': onAuthApiLoad });
+                gapi.load('picker');
+            }
+        });
+
+        document.getElementById('closeDriveModalBtn').addEventListener('click', () => {
+            document.getElementById('driveModal').classList.add('hidden');
+        });
+
+        function onAuthApiLoad() {
+            window.gapi.auth.authorize({
+                'client_id': DRIVE_CLIENT_ID,
+                'scope': ['https://www.googleapis.com/auth/drive.readonly'],
+                'immediate': false
+            }, handleAuthResult);
+        }
+
+        function handleAuthResult(authResult) {
+            if (authResult && !authResult.error) {
+                createPicker(authResult.access_token);
+            }
+        }
+
+        function createPicker(oauthToken) {
+            const view = new google.picker.DocsView(google.picker.ViewId.PRESENTATIONS)
+                .setIncludeFolders(true)
+                .setSelectFolderEnabled(false);
+                
+            const picker = new google.picker.PickerBuilder()
+                .addView(view)
+                .setOAuthToken(oauthToken)
+                .setDeveloperKey(DRIVE_DEVELOPER_KEY)
+                .setCallback(pickerCallback)
+                .build();
+            picker.setVisible(true);
+        }
+
+        function pickerCallback(data) {
+            if (data.action == google.picker.Action.PICKED) {
+                let url = data.docs[0].url;
+                if (url.includes('/edit')) {
+                    url = url.replace(/\/edit.*$/, '/preview');
+                }
+                document.getElementById('presentationUrl').value = url;
+                document.getElementById('iframePlaceholder').style.display = 'none';
+                document.getElementById('presentationIframe').src = url;
+            }
+        }
+
+        // --- INICIALIZACIÓN DE EVENTOS ---
+        micBtn.addEventListener('click', toggleMic);
+        
+        gridSizeSelect.addEventListener('change', (e) => {
+            createGrid(parseInt(e.target.value));
+        });
+
+        // Iniciar
+        createGrid(4); // Iniciar con 4 pantallas por defecto
+        setupSpeechRecognition();
+
+    </script>
+</body>
+</html>
